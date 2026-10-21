@@ -1527,3 +1527,253 @@ function addFunCommands(commands) {
   }
 }
 
+// ======================================================
+// 🛠️ COMANDOS DE MODERACIÓN E INFORMACIÓN
+// ======================================================
+
+function buildCommands() {
+  const commands = [
+    new SlashCommandBuilder()
+      .setName('help')
+      .setDescription('Mostrar los comandos de NOXVEN'),
+
+    new SlashCommandBuilder()
+      .setName('ping')
+      .setDescription('Consultar la latencia'),
+
+    new SlashCommandBuilder()
+      .setName('botinfo')
+      .setDescription('Información del bot'),
+
+    new SlashCommandBuilder()
+      .setName('serverinfo')
+      .setDescription('Información del servidor'),
+
+    new SlashCommandBuilder()
+      .setName('userinfo')
+      .setDescription('Información de un usuario')
+      .addUserOption(option =>
+        option.setName('usuario')
+          .setDescription('Usuario')
+          .setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('avatar')
+      .setDescription('Consultar un avatar')
+      .addUserOption(option =>
+        option.setName('usuario')
+          .setDescription('Usuario')
+          .setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('preguntar')
+      .setDescription('Consultar la IA de soporte')
+      .addStringOption(option =>
+        option.setName('consulta')
+          .setDescription('Tu consulta')
+          .setRequired(true)
+          .setMaxLength(1500)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('embed')
+      .setDescription('Crear un embed personalizado')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+      .addStringOption(option =>
+        option.setName('titulo')
+          .setDescription('Título')
+          .setRequired(true)
+          .setMaxLength(256)
+      )
+      .addStringOption(option =>
+        option.setName('descripcion')
+          .setDescription('Descripción')
+          .setRequired(true)
+          .setMaxLength(4000)
+      )
+      .addStringOption(option =>
+        option.setName('color')
+          .setDescription('Color hexadecimal')
+          .setRequired(false)
+      )
+      .addChannelOption(option =>
+        option.setName('canal')
+          .setDescription('Canal donde publicar')
+          .addChannelTypes(ChannelType.GuildText)
+          .setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('clear')
+      .setDescription('Eliminar mensajes')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+      .addIntegerOption(option =>
+        option.setName('cantidad')
+          .setDescription('Cantidad entre 1 y 100')
+          .setMinValue(1)
+          .setMaxValue(100)
+          .setRequired(true)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('timeout')
+      .setDescription('Aplicar tiempo de espera')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+      .addUserOption(option =>
+        option.setName('usuario')
+          .setDescription('Usuario')
+          .setRequired(true)
+      )
+      .addIntegerOption(option =>
+        option.setName('minutos')
+          .setDescription('Duración en minutos')
+          .setMinValue(1)
+          .setMaxValue(40320)
+          .setRequired(true)
+      )
+      .addStringOption(option =>
+        option.setName('motivo')
+          .setDescription('Motivo')
+          .setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('kick')
+      .setDescription('Expulsar a un usuario')
+      .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
+      .addUserOption(option =>
+        option.setName('usuario')
+          .setDescription('Usuario')
+          .setRequired(true)
+      )
+      .addStringOption(option =>
+        option.setName('motivo')
+          .setDescription('Motivo')
+          .setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('ban')
+      .setDescription('Banear a un usuario')
+      .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+      .addUserOption(option =>
+        option.setName('usuario')
+          .setDescription('Usuario')
+          .setRequired(true)
+      )
+      .addStringOption(option =>
+        option.setName('motivo')
+          .setDescription('Motivo')
+          .setRequired(false)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('warn')
+      .setDescription('Advertir a un usuario')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+      .addUserOption(option =>
+        option.setName('usuario')
+          .setDescription('Usuario')
+          .setRequired(true)
+      )
+      .addStringOption(option =>
+        option.setName('motivo')
+          .setDescription('Motivo')
+          .setRequired(true)
+      ),
+
+    new SlashCommandBuilder()
+      .setName('postulaciones')
+      .setDescription('Publicar el panel de postulaciones')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  ];
+
+  addFunCommands(commands);
+
+  commands.push(
+    new SlashCommandBuilder()
+      .setName('ticketpanel')
+      .setDescription('Publicar el panel de tickets')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON()
+  );
+
+  return commands.map(command =>
+    typeof command.toJSON === 'function'
+      ? command.toJSON()
+      : command
+  );
+}
+
+// ======================================================
+// 📋 PANEL DE POSTULACIONES
+// ======================================================
+
+async function ensureApplicationPanel(guild) {
+  const channel = await guild.channels
+    .fetch(CONFIG.applicationPanelChannel)
+    .catch(() => null);
+
+  if (!channel || !channel.isTextBased()) return;
+
+  const recent = await channel.messages.fetch({ limit: 30 })
+    .catch(() => null);
+
+  if (recent?.some(message =>
+    message.author.id === client.user.id &&
+    message.embeds.some(embed =>
+      embed.title === '♛・𝐍𝐎𝐗𝐕𝐄𝐍 | 𝐏𝐎𝐒𝐓𝐔𝐋𝐀𝐂𝐈𝐎𝐍𝐄𝐒'
+    )
+  )) return;
+
+  await channel.send({
+    embeds: [
+      makeEmbed(
+        '♛・𝐍𝐎𝐗𝐕𝐄𝐍 | 𝐏𝐎𝐒𝐓𝐔𝐋𝐀𝐂𝐈𝐎𝐍𝐄𝐒',
+        [
+          '𓆩♛𓆪 ¿Quieres formar parte del equipo de NOXVEN?',
+          '',
+          '🛡️・**Staff**',
+          'Únete al equipo de moderación.',
+          '',
+          '💻・**Dev**',
+          'Participa en el desarrollo de nuestros proyectos.',
+          '',
+          '🤝・**Caza ALLYS**',
+          'Ayúdanos a encontrar nuevos servidores aliados.',
+          '',
+          '📩 Las preguntas se enviarán por mensaje privado, una a una.',
+          '',
+          '♛・𝐍𝐎𝐗𝐕𝐄𝐍'
+        ].join('\n')
+      )
+    ],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('nox_application_select')
+          .setPlaceholder('Selecciona una postulación...')
+          .addOptions([
+            {
+              label: 'Postulación Staff',
+              emoji: '🛡️',
+              value: 'staff'
+            },
+            {
+              label: 'Postulación Dev',
+              emoji: '💻',
+              value: 'dev'
+            },
+            {
+              label: 'Postulación Caza ALLYS',
+              emoji: '🤝',
+              value: 'ally'
+            }
+          ])
+      )
+    ]
+  });
+}
+
