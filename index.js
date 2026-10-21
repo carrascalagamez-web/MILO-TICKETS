@@ -1364,4 +1364,166 @@ client.on('messageCreate', async message => {
   );
 });
 
+// ======================================================
+// 📜 EVENTOS DE MENSAJES, ROLES Y CANALES
+// ======================================================
+
+client.on('messageDelete', async message => {
+  if (!message.guild || message.author?.bot) return;
+
+  await logEvent(
+    message.guild,
+    '🗑️・MENSAJE ELIMINADO',
+    `Usuario: ${message.author?.tag || 'Desconocido'}\nCanal: ${message.channel}\nContenido: ${(message.content || '[Sin contenido]').slice(0, 1500)}`,
+    'messageLogs'
+  );
+});
+
+client.on('messageUpdate', async (oldMessage, newMessage) => {
+  if (!newMessage.guild || newMessage.author?.bot) return;
+  if (oldMessage.content === newMessage.content) return;
+
+  await logEvent(
+    newMessage.guild,
+    '✏️・MENSAJE EDITADO',
+    `Usuario: ${newMessage.author?.tag || 'Desconocido'}\nCanal: ${newMessage.channel}\nAntes: ${(oldMessage.content || '').slice(0, 700)}\nDespués: ${(newMessage.content || '').slice(0, 700)}`,
+    'messageLogs'
+  );
+});
+
+client.on('guildBanAdd', async ban => {
+  await logEvent(
+    ban.guild,
+    '🔨・BANEO',
+    `Usuario: ${ban.user.tag}\nID: ${ban.user.id}`,
+    'moderationLogs'
+  );
+});
+
+client.on('guildBanRemove', async ban => {
+  await logEvent(
+    ban.guild,
+    '🔓・BANEO RETIRADO',
+    `Usuario: ${ban.user.tag}\nID: ${ban.user.id}`,
+    'moderationLogs'
+  );
+});
+
+client.on('channelCreate', async channel => {
+  if (!channel.guild) return;
+
+  await logEvent(
+    channel.guild,
+    '📁・CANAL CREADO',
+    `Canal: ${channel.name}\nID: ${channel.id}`,
+    'securityLogs'
+  );
+});
+
+client.on('channelDelete', async channel => {
+  if (!channel.guild) return;
+
+  await logEvent(
+    channel.guild,
+    '🗑️・CANAL ELIMINADO',
+    `Canal: ${channel.name}\nID: ${channel.id}`,
+    'securityLogs'
+  );
+});
+
+client.on('roleCreate', async role => {
+  await logEvent(
+    role.guild,
+    '🎭・ROL CREADO',
+    `Rol: ${role.name}\nID: ${role.id}`,
+    'securityLogs'
+  );
+});
+
+client.on('roleDelete', async role => {
+  await logEvent(
+    role.guild,
+    '🗑️・ROL ELIMINADO',
+    `Rol: ${role.name}\nID: ${role.id}`,
+    'securityLogs'
+  );
+});
+
+client.on('voiceStateUpdate', async (oldState, newState) => {
+  if (!oldState.guild) return;
+
+  const member = newState.member || oldState.member;
+  if (!member) return;
+
+  const before = oldState.channel?.name || 'Ninguno';
+  const after = newState.channel?.name || 'Ninguno';
+
+  if (before === after) return;
+
+  await logEvent(
+    oldState.guild,
+    '🔊・CAMBIO DE VOZ',
+    `Usuario: ${member.user.tag}\nAntes: ${before}\nDespués: ${after}`,
+    'securityLogs'
+  );
+});
+
+// ======================================================
+// 🎮 COMANDOS DE DIVERSIÓN
+// ======================================================
+
+const funCommands = [
+  ['joke', 'Contar un chiste'],
+  ['coinflip', 'Lanzar una moneda'],
+  ['dice', 'Lanzar un dado'],
+  ['8ball', 'Consultar la bola mágica'],
+  ['rate', 'Obtener una puntuación aleatoria'],
+  ['iq', 'Medidor de IQ de broma'],
+  ['aura', 'Consultar tu aura ficticia'],
+  ['vibe', 'Consultar tu vibra ficticia'],
+  ['compliment', 'Recibir un cumplido'],
+  ['rps', 'Piedra, papel o tijera'],
+  ['trivia', 'Responder una pregunta'],
+  ['riddle', 'Recibir una adivinanza']
+];
+
+const FUN_RESPONSES = {
+  joke: [
+    '¿Qué hace una abeja en el gimnasio? ¡Zum-ba!',
+    '¿Qué le dice un bit a otro? Nos vemos en el bus.',
+    '¿Por qué el libro de matemáticas estaba triste? Tenía muchos problemas.'
+  ],
+  compliment: [
+    'Tu presencia hace que la comunidad sea mejor. 🖤',
+    'Tienes una energía genial. ✨',
+    'Tu participación suma mucho a NOXVEN. ♛'
+  ],
+  riddle: [
+    'Tengo agujas, pero no sé coser. ¿Qué soy? (Un reloj)',
+    'Cuanto más me quitas, más grande soy. ¿Qué soy? (Un agujero)'
+  ]
+};
+
+function randomItem(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+function addFunCommands(commands) {
+  for (const [name, description] of funCommands) {
+    const builder = new SlashCommandBuilder()
+      .setName(name)
+      .setDescription(description);
+
+    if (['rate', 'iq', 'aura', 'vibe'].includes(name)) {
+      builder.addUserOption(option =>
+        option
+          .setName('usuario')
+          .setDescription('Usuario que deseas consultar')
+          .setRequired(false)
+      );
+    }
+
+    commands.push(builder.toJSON());
+  }
+}
 
