@@ -1204,4 +1204,164 @@ client.on('messageCreate', async message => {
   }
 });
 
+// ======================================================
+// 🤝 SISTEMA DE ALLYS
+// ======================================================
+
+const INVITE_REGEX =
+  /(?:https?:\/\/)?(?:www\.)?(?:discord\.gg\/|discord(?:app)?\.com\/invite\/)([a-zA-Z0-9-]+)/i;
+
+client.on('messageCreate', async message => {
+  if (message.author.bot || !message.guild) return;
+  if (message.channel.id !== CONFIG.allyChannel) return;
+
+  const match = message.content.match(INVITE_REGEX);
+  if (!match) return;
+
+  try {
+    const invite = await client.fetchInvite(match[1]);
+
+    if (!invite.guild) {
+      return message.reply('No pude verificar el servidor de esa invitación.');
+    }
+
+    const guildId = invite.guild.id;
+
+    if (db.processedAllies.includes(guildId)) {
+      return message.reply('Este servidor ya está registrado como aliado.');
+    }
+
+    db.processedAllies.push(guildId);
+    db.allies[guildId] = {
+      name: invite.guild.name,
+      ownerId: message.author.id,
+      invite: match[0],
+      registeredAt: Date.now()
+    };
+
+    db.points[message.author.id] =
+      (db.points[message.author.id] || 0) + 1;
+
+    saveData();
+
+    await message.channel.send({
+      embeds: [
+        makeEmbed(
+          '♛・𝐍𝐔𝐄𝐕𝐀 𝐀𝐋𝐋𝐘',
+          [
+            '🤝 ¡Gracias por realizar esta alianza con NOXVEN!',
+            '',
+            `🌐 **Servidor:** ${invite.guild.name}`,
+            `👤 **Responsable:** <@${message.author.id}>`,
+            '⭐ **Puntos obtenidos:** +1',
+            '',
+            '🖤 ¡Gracias por apoyar nuestra comunidad!'
+          ].join('\n')
+        )
+      ]
+    });
+
+    await message.channel.send({
+      content: `<@&${CONFIG.allyRole}>`,
+      allowedMentions: { roles: [CONFIG.allyRole] }
+    });
+  } catch (error) {
+    console.error('Error verificando alianza:', error);
+    await message.reply(
+      'No pude validar la invitación. Comprueba que siga activa.'
+    ).catch(() => {});
+  }
+});
+
+// ======================================================
+// 🛡️ ANTI-SPAM Y ANTI-INSULTOS
+// ======================================================
+
+// Lista básica de ejemplos. Personaliza y revisa el filtro antes
+// de usarlo en producción: no existe una lista universal de insultos.
+const BAD_WORDS = [
+  'idiota',
+  'imbecil',
+  'imbécil'
+];
+
+const recentMessages = new Map();
+
+client.on('messageCreate', async message => {
+  if (!message.guild || message.author.bot) return;
+
+  const member = message.member;
+  if (!member || member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return;
+  }
+
+  const content = message.content.toLowerCase();
+  const normalized = content.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const insult = BAD_WORDS.some(word =>
+    normalized.includes(word.normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, ''))
+  );
+
+  const now = Date.now();
+  const key = `${message.guild.id}:${message.author.id}`;
+
+  const recent = recentMessages.get(key) || [];
+  recent.push({
+    content: message.content,
+    time: now
+  });
+
+  const active = recent.filter(item => now - item.time < 7000);
+  recentMessages.set(key, active);
+
+  const spam = active.length >= 6 &&
+    active.slice(-5).every(item =>
+      item.content === active[active.length - 1].content
+    );
+
+  if (!insult && !spam) return;
+
+  await message.delete().catch(() => {});
+
+  const reason = insult ? 'Insultos' : 'Spam';
+
+  const warningKey = `${message.guild.id}:${message.author.id}`;
+
+  db.warnings[warningKey] = (db.warnings[warningKey] || 0) + 1;
+
+  const warnings = db.warnings[warningKey];
+
+  saveData();
+
+  await message.channel.send({
+    content: `<@${message.author.id}> ⚠️ Tu mensaje fue eliminado por **${reason}**.`,
+    allowedMentions: { users: [message.author.id] }
+  }).then(msg => {
+    setTimeout(() => msg.delete().catch(() => {}), 5000);
+  }).catch(() => {});
+
+  if (warnings === 2) {
+    await member.timeout(
+      60 * 1000,
+      `NOXVEN AUTOMOD: ${reason}`
+    ).catch(() => {});
+  }
+
+  if (warnings === 3) {
+    await member.timeout(
+      5 * 60 * 1000,
+      `NOXVEN AUTOMOD: infracciones repetidas`
+    ).catch(() => {});
+  }
+
+  await logEvent(
+    message.guild,
+    '🛡️・AUTOMOD',
+    `Usuario: ${message.author.tag}\nMotivo: ${reason}\nInfracciones: ${warnings}\nCanal: ${message.channel}`,
+    'securityLogs'
+  );
+});
+
 
