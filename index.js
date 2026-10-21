@@ -1777,3 +1777,495 @@ async function ensureApplicationPanel(guild) {
   });
 }
 
+// ======================================================
+// ⚙️ INTERACCIONES
+// ======================================================
+
+client.on('interactionCreate', async interaction => {
+  try {
+    if (interaction.isModalSubmit()) {
+      if (interaction.customId.startsWith('nox_ticket_form_')) {
+        const index = Number(
+          interaction.customId.replace('nox_ticket_form_', '')
+        );
+
+        return createTicketFromModal(interaction, index);
+      }
+
+      return;
+    }
+
+    if (interaction.isStringSelectMenu()) {
+      if (interaction.customId === 'nox_ticket_select') {
+        return openTicket(
+          interaction,
+          Number(interaction.values[0])
+        );
+      }
+
+      if (interaction.customId === 'nox_application_select') {
+        return startApplication(
+          interaction,
+          interaction.values[0]
+        );
+      }
+
+      if (interaction.customId === 'nox_ticket_action') {
+        const ticket = db.tickets[interaction.channelId];
+
+        if (!ticket) {
+          return interaction.reply({
+            content: 'Este canal no está registrado como ticket.',
+            ephemeral: true
+          });
+        }
+
+        const action = interaction.values[0];
+
+        if (action === 'participants') {
+          const visible = interaction.channel.permissionOverwrites.cache
+            .filter(overwrite =>
+              overwrite.allow.has(PermissionFlagsBits.ViewChannel) &&
+              overwrite.type === 1
+            )
+            .map(overwrite => `<@${overwrite.id}>`);
+
+          return interaction.reply({
+            content: visible.join('\n') || 'No hay participantes adicionales.',
+            ephemeral: true
+          });
+        }
+
+        if (!isStaff(interaction.member)) {
+          return interaction.reply({
+            content: 'No tienes autorización para administrar este ticket.',
+            ephemeral: true
+          });
+        }
+
+        if (action === 'close') {
+          return closeTicket(interaction, ticket);
+        }
+
+        if (action === 'claim') {
+          ticket.claimedBy = interaction.user.id;
+          saveData();
+
+          return interaction.reply({
+            embeds: [
+              makeEmbed(
+                '🙋・TICKET RECLAMADO',
+                `El ticket ha sido reclamado por <@${interaction.user.id}>.`
+              )
+            ]
+          });
+        }
+
+        if (action === 'release') {
+          ticket.claimedBy = null;
+          saveData();
+
+          return interaction.reply({
+            content: 'El ticket ha sido liberado.',
+            ephemeral: true
+          });
+        }
+
+        if (action === 'reopen') {
+          ticket.status = 'open';
+          saveData();
+
+          await interaction.channel.permissionOverwrites.edit(
+            ticket.userId,
+            { SendMessages: true, ViewChannel: true }
+          );
+
+          return interaction.reply({
+            content: 'El ticket ha sido reabierto.'
+          });
+        }
+
+        if (action === 'delete') {
+          await interaction.reply({
+            content: 'El canal se eliminará en 5 segundos.',
+            ephemeral: true
+          });
+
+          setTimeout(() => {
+            interaction.channel.delete().catch(() => {});
+          }, 5000);
+
+          return;
+        }
+
+        if (action === 'notify') {
+          const user = await client.users
+            .fetch(ticket.userId)
+            .catch(() => null);
+
+          if (user) {
+            await user.send(
+              `🔔 Tienes una actualización en tu ticket de NOXVEN: ${interaction.channel.name}`
+            ).catch(() => {});
+          }
+
+          return interaction.reply({
+            content: 'Se intentó enviar el aviso al usuario.',
+            ephemeral: true
+          });
+        }
+
+        if (action === 'add' || action === 'remove') {
+          const modal = new ModalBuilder()
+            .setCustomId(`nox_ticket_${action}_${interaction.channelId}`)
+            .setTitle(action === 'add' ? 'Añadir usuario' : 'Quitar usuario');
+
+          modal.addComponents(
+            new ActionRowBuilder().addComponents(
+              new TextInputBuilder()
+                .setCustomId('user_id')
+                .setLabel('ID del usuario')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+            )
+          );
+
+          return interaction.showModal(modal);
+        }
+      }
+    }
+
+    if (interaction.isButton()) {
+      const parts = interaction.customId.split('_');
+
+      if (parts[0] === 'nox' && parts[1] === 'app') {
+        const action = parts[2];
+        const type = parts[3];
+        const userId = parts[4];
+
+        if (
+          !interaction.member.permissions.has(PermissionFlagsBits.Administrator) &&
+          !interaction.member.roles.cache.has(CONFIG.applicationManagerRole)
+        ) {
+          return interaction.reply({
+            content: 'No tienes autorización para revisar postulaciones.',
+            ephemeral: true
+          });
+        }
+
+        const user = await client.users.fetch(userId).catch(() => null);
+
+        if (user) {
+          const message = action === 'accept'
+            ? '¡Tu postulación a NOXVEN ha sido aceptada! El equipo se pondrá en contacto contigo.'
+            : 'Tu postulación a NOXVEN no ha sido aceptada en esta ocasión. Gracias por participar.';
+
+          await user.send(message).catch(() => {});
+        }
+
+        await interaction.update({
+          embeds: [
+            makeEmbed(
+              action === 'accept'
+                ? '✅・POSTULACIÓN ACEPTADA'
+                : '❌・POSTULACIÓN RECHAZADA',
+              `Revisada por <@${interaction.user.id}>.\nUsuario: <@${userId}>\nTipo: ${type}`
+            )
+          ],
+          components: []
+        });
+
+        await logEvent(
+          interaction.guild,
+          '📋・POSTULACIÓN REVISADA',
+          `Tipo: ${type}\nUsuario: ${userId}\nAcción: ${action}\nRevisada por: ${interaction.user.tag}`,
+          'applicationLogs'
+        );
+
+        return;
+      }
+    }
+
+    if (!interaction.isChatInputCommand()) return;
+
+    const { commandName } = interaction;
+
+    if (commandName === 'help') {
+      return interaction.reply({
+        embeds: [
+          makeEmbed(
+            '♛・𝐍𝐎𝐗𝐕𝐄𝐍 | 𝐂𝐎𝐌𝐀𝐍𝐃𝐎𝐒',
+            [
+              '📌 **Información**',
+              '`/ping` `/botinfo` `/serverinfo`',
+              '`/userinfo` `/avatar`',
+              '',
+              '🤖 **IA**',
+              '`/preguntar`',
+              '',
+              '🎨 **Herramientas**',
+              '`/embed`',
+              '',
+              '🛡️ **Moderación**',
+              '`/clear` `/timeout` `/kick` `/ban` `/warn`',
+              '',
+              '🎫 **Tickets**',
+              'Selecciona una categoría en el panel de soporte.',
+              '',
+              '🎮 **Diversión**',
+              '`/joke` `/coinflip` `/dice` `/8ball`',
+              '`/rate` `/iq` `/aura` `/vibe`',
+              '`/compliment` `/rps` `/trivia` `/riddle`'
+            ].join('\n')
+          )
+        ],
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'ping') {
+      return interaction.reply({
+        embeds: [
+          makeEmbed(
+            '🏓・LATENCIA',
+            `Discord: **${client.ws.ping} ms**`
+          )
+        ],
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'botinfo') {
+      return interaction.reply({
+        embeds: [
+          makeEmbed(
+            '♛・𝐍𝐎𝐗𝐕𝐄𝐍',
+            `Servidores: **${client.guilds.cache.size}**\nUsuarios aproximados: **${client.guilds.cache.reduce((n, g) => n + g.memberCount, 0)}**\nLatencia: **${client.ws.ping} ms**`
+          )
+        ],
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'serverinfo') {
+      const guild = interaction.guild;
+
+      return interaction.reply({
+        embeds: [
+          makeEmbed(
+            `♛・${guild.name}`,
+            `Miembros: **${guild.memberCount}**\nCanales: **${guild.channels.cache.size}**\nRoles: **${guild.roles.cache.size}**\nPropietario: <@${guild.ownerId}>`
+          )
+        ],
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'userinfo') {
+      const user = interaction.options.getUser('usuario') || interaction.user;
+
+      return interaction.reply({
+        embeds: [
+          makeEmbed(
+            '👤・INFORMACIÓN',
+            `Usuario: ${user.tag}\nID: ${user.id}\nCuenta creada: <t:${Math.floor(user.createdTimestamp / 1000)}:F>`
+          ).setThumbnail(user.displayAvatarURL())
+        ],
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'avatar') {
+      const user = interaction.options.getUser('usuario') || interaction.user;
+
+      return interaction.reply({
+        embeds: [
+          makeEmbed('🖼️・AVATAR', `[Abrir imagen](${user.displayAvatarURL({ size: 4096 })})`)
+            .setImage(user.displayAvatarURL({ size: 1024 }))
+        ],
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'preguntar') {
+      const question = interaction.options.getString('consulta');
+
+      await interaction.deferReply({ ephemeral: true });
+
+      const answer = await askGroq(
+        question,
+        interaction.user.id,
+        interaction.guild?.name || 'NOXVEN'
+      );
+
+      return interaction.editReply({
+        embeds: [
+          makeEmbed('🤖・𝐍𝐎𝐗𝐕𝐄𝐍 𝐈𝐀', answer.slice(0, 4000))
+        ]
+      });
+    }
+
+    if (commandName === 'embed') {
+      const title = interaction.options.getString('titulo');
+      const description = interaction.options.getString('descripcion');
+      const color = interaction.options.getString('color') || '#171717';
+      const channel = interaction.options.getChannel('canal') || interaction.channel;
+
+      if (!/^#?[0-9a-fA-F]{6}$/.test(color)) {
+        return interaction.reply({
+          content: 'Usa un color hexadecimal válido, por ejemplo `#8B5CF6`.',
+          ephemeral: true
+        });
+      }
+
+      await channel.send({
+        embeds: [
+          makeEmbed(
+            title,
+            description,
+            parseInt(color.replace('#', ''), 16)
+          )
+        ]
+      });
+
+      return interaction.reply({
+        content: `Embed publicado en ${channel}.`,
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'clear') {
+      const amount = interaction.options.getInteger('cantidad');
+
+      const messages = await interaction.channel.bulkDelete(
+        amount,
+        true
+      );
+
+      return interaction.reply({
+        content: `Se eliminaron ${messages.size} mensajes.`,
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'timeout') {
+      const user = interaction.options.getUser('usuario');
+      const minutes = interaction.options.getInteger('minutos');
+      const reason = interaction.options.getString('motivo') || 'Sin motivo';
+
+      const member = await interaction.guild.members
+        .fetch(user.id)
+        .catch(() => null);
+
+      if (!member) {
+        return interaction.reply({
+          content: 'No encontré a ese miembro.',
+          ephemeral: true
+        });
+      }
+
+      await member.timeout(minutes * 60 * 1000, reason);
+
+      await logEvent(
+        interaction.guild,
+        '🔇・TIMEOUT',
+        `Usuario: ${user.tag}\nDuración: ${minutes} minutos\nMotivo: ${reason}`,
+        'moderationLogs'
+      );
+
+      return interaction.reply({
+        content: `${user.tag} recibió un timeout de ${minutes} minutos.`,
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'kick' || commandName === 'ban') {
+      const user = interaction.options.getUser('usuario');
+      const reason = interaction.options.getString('motivo') || 'Sin motivo';
+
+      const member = await interaction.guild.members
+        .fetch(user.id)
+        .catch(() => null);
+
+      if (!member) {
+        return interaction.reply({
+          content: 'No encontré a ese miembro.',
+          ephemeral: true
+        });
+      }
+
+      if (commandName === 'kick') {
+        await member.kick(reason);
+      } else {
+        await member.ban({ reason });
+      }
+
+      await logEvent(
+        interaction.guild,
+        commandName === 'kick' ? '👢・EXPULSIÓN' : '🔨・BANEO',
+        `Usuario: ${user.tag}\nModerador: ${interaction.user.tag}\nMotivo: ${reason}`,
+        'moderationLogs'
+      );
+
+      return interaction.reply({
+        content: `Acción aplicada a ${user.tag}.`,
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'warn') {
+      const user = interaction.options.getUser('usuario');
+      const reason = interaction.options.getString('motivo');
+      const key = `${interaction.guild.id}:${user.id}`;
+
+      db.warnings[key] = (db.warnings[key] || 0) + 1;
+      saveData();
+
+      await user.send(
+        `⚠️ Has recibido una advertencia en ${interaction.guild.name}.\nMotivo: ${reason}`
+      ).catch(() => {});
+
+      await logEvent(
+        interaction.guild,
+        '⚠️・ADVERTENCIA',
+        `Usuario: ${user.tag}\nMotivo: ${reason}\nTotal: ${db.warnings[key]}`,
+        'moderationLogs'
+      );
+
+      return interaction.reply({
+        content: `Advertencia registrada para ${user.tag}.`,
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'ticketpanel') {
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({
+          content: 'No tienes permiso para publicar el panel.',
+          ephemeral: true
+        });
+      }
+
+      await ensureTicketPanel(interaction.guild);
+
+      return interaction.reply({
+        content: 'Se comprobó el panel de tickets.',
+        ephemeral: true
+      });
+    }
+
+    if (commandName === 'postulaciones') {
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({
+          content: 'No tienes permiso para publicar el panel.',
+          ephemeral: true
+        });
+      }
+
+      await ensureApplicationPanel(interaction.guild);
+
+      return interaction.reply({
+        content: 'Se comprobó el panel de postulaciones.',
+        ephemeral: true
+      });
+                                                                                 }
