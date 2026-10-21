@@ -2268,4 +2268,246 @@ client.on('interactionCreate', async interaction => {
         content: 'Se comprobó el panel de postulaciones.',
         ephemeral: true
       });
-                                                                                 }
+    }
+
+    // COMANDOS DIVERTIDOS
+    if (funCommands.some(([name]) => name === commandName)) {
+      if (commandName === 'joke') {
+        return interaction.reply({
+          embeds: [makeEmbed('😂・CHISTE', randomItem(FUN_RESPONSES.joke))]
+        });
+      }
+
+      if (commandName === 'compliment') {
+        return interaction.reply({
+          embeds: [makeEmbed('🖤・CUMPLIDO', randomItem(FUN_RESPONSES.compliment))]
+        });
+      }
+
+      if (commandName === 'riddle') {
+        return interaction.reply({
+          embeds: [makeEmbed('🧩・ADIVINANZA', randomItem(FUN_RESPONSES.riddle))]
+        });
+      }
+
+      if (commandName === 'coinflip') {
+        return interaction.reply({
+          embeds: [makeEmbed('🪙・MONEDA', randomItem(['Cara', 'Sello']))]
+        });
+      }
+
+      if (commandName === 'dice') {
+        return interaction.reply({
+          embeds: [makeEmbed('🎲・DADO', `Resultado: **${1 + Math.floor(Math.random() * 6)}**`)]
+        });
+      }
+
+      if (commandName === '8ball') {
+        return interaction.reply({
+          embeds: [makeEmbed('🔮・BOLA MÁGICA', randomItem([
+            'Sí, definitivamente.',
+            'No parece probable.',
+            'Pregunta de nuevo más tarde.',
+            'Las señales apuntan a que sí.',
+            'No puedo asegurarlo.'
+          ]))]
+        });
+      }
+
+      if (['rate', 'iq', 'aura', 'vibe'].includes(commandName)) {
+        const user = interaction.options.getUser('usuario') || interaction.user;
+
+        const responses = {
+          rate: `La puntuación de ${user} es **${Math.floor(Math.random() * 11)}/10**.`,
+          iq: `El IQ ficticio de ${user} es **${Math.floor(Math.random() * 201)}**. ¡Solo por diversión!`,
+          aura: `El aura ficticia de ${user} es **${randomItem(['plateada', 'oscura', 'cósmica', 'dorada', 'neón'])}**.`,
+          vibe: `La vibra de ${user} hoy es **${randomItem(['épica', 'tranquila', 'caótica', 'misteriosa', 'legendaria'])}**.`
+        };
+
+        return interaction.reply({
+          embeds: [makeEmbed('♛・RESULTADO', responses[commandName])]
+        });
+      }
+
+      if (commandName === 'rps') {
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              '✊・PIEDRA, PAPEL O TIJERA',
+              `Tu resultado aleatorio: **${randomItem(['Piedra', 'Papel', 'Tijera'])}**`
+            )
+          ]
+        });
+      }
+
+      if (commandName === 'trivia') {
+        return interaction.reply({
+          embeds: [
+            makeEmbed(
+              '🧠・TRIVIA',
+              '¿Cuál es el planeta más grande del sistema solar?\n\nResponde en el chat. La respuesta es **Júpiter**.'
+            )
+          ]
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error en interacción:', error);
+
+    if (interaction.isRepliable()) {
+      await safeReply(interaction, {
+        content: 'Ocurrió un error. Revisa los registros del bot.',
+        ephemeral: true
+      });
+    }
+  }
+});
+
+// ======================================================
+// 🛠️ MODALES PARA AÑADIR Y QUITAR PARTICIPANTES
+// ======================================================
+
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isModalSubmit()) return;
+
+  if (!interaction.customId.startsWith('nox_ticket_')) return;
+
+  const parts = interaction.customId.split('_');
+
+  const action = parts[2];
+  const channelId = parts.slice(3).join('_');
+
+  const ticket = db.tickets[channelId];
+
+  if (!ticket || !isStaff(interaction.member)) {
+    return interaction.reply({
+      content: 'No estás autorizado para modificar este ticket.',
+      ephemeral: true
+    });
+  }
+
+  const userId = interaction.fields.getTextInputValue('user_id').trim();
+
+  if (!/^\d{17,20}$/.test(userId)) {
+    return interaction.reply({
+      content: 'Introduce un ID de Discord válido.',
+      ephemeral: true
+    });
+  }
+
+  const channel = await interaction.guild.channels
+    .fetch(channelId)
+    .catch(() => null);
+
+  if (!channel) {
+    return interaction.reply({
+      content: 'No encontré el canal del ticket.',
+      ephemeral: true
+    });
+  }
+
+  if (action === 'add') {
+    await channel.permissionOverwrites.edit(userId, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      AttachFiles: true
+    });
+  } else if (action === 'remove') {
+    await channel.permissionOverwrites.delete(userId).catch(() => {});
+  }
+
+  return interaction.reply({
+    content: action === 'add'
+      ? 'Usuario añadido al ticket.'
+      : 'Se retiraron los permisos del usuario.',
+    ephemeral: true
+  });
+});
+
+// ======================================================
+// ♛ INICIO
+// ======================================================
+
+client.once('ready', async () => {
+  console.log(`♛ ${client.user.tag} está conectado.`);
+
+  client.user.setPresence({
+    status: 'dnd',
+    activities: [
+      {
+        name: 'NOXVEN | Beyond the ordinary.',
+        type: ActivityType.Watching
+      }
+    ]
+  });
+
+  for (const guild of client.guilds.cache.values()) {
+    try {
+      await initializeGuild(guild);
+    } catch (error) {
+      console.error(`Error inicializando ${guild.name}:`, error);
+    }
+  }
+
+  try {
+    const rest = new REST({ version: '10' })
+      .setToken(process.env.DISCORD_TOKEN);
+
+    await rest.put(
+      Routes.applicationGuildCommands(
+        process.env.CLIENT_ID,
+        process.env.GUILD_ID
+      ),
+      { body: buildCommands() }
+    );
+
+    console.log('♛ Comandos de NOXVEN registrados.');
+  } catch (error) {
+    console.error('Error registrando comandos:', error);
+  }
+});
+
+// ======================================================
+// 🌐 SERVIDOR HTTP PARA HOSTING
+// ======================================================
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/plain; charset=utf-8'
+  });
+
+  res.end('♛ NOXVEN está funcionando.');
+});
+
+server.listen(Number(process.env.PORT) || 3000, '0.0.0.0', () => {
+  console.log('🌐 Servidor HTTP iniciado.');
+});
+
+// ======================================================
+// 🚨 ERRORES
+// ======================================================
+
+process.on('unhandledRejection', error => {
+  console.error('Promesa rechazada:', error);
+});
+
+process.on('uncaughtException', error => {
+  console.error('Excepción no controlada:', error);
+});
+
+// ======================================================
+// 🔌 CONEXIÓN
+// ======================================================
+
+if (!process.env.DISCORD_TOKEN) {
+  console.error('Falta DISCORD_TOKEN en el archivo .env');
+  process.exit(1);
+}
+
+if (!process.env.GROQ_API_KEY) {
+  console.error('Falta GROQ_API_KEY en el archivo .env');
+  process.exit(1);
+}
+
+client.login(process.env.DISCORD_TOKEN);
