@@ -830,4 +830,269 @@ async function createTicketFromModal(interaction, typeIndex) {
     }
   });
 
-  await channel.send
+  await channel.send({
+    embeds: [
+      makeEmbed(
+        `♛・𝐓𝐈𝐂𝐊𝐄𝐓 ${type.emoji} ${type.label.toUpperCase()}`,
+        `Hola <@${interaction.user.id}>. Tu solicitud ha sido creada.\n\nEl equipo revisará tu caso cuando esté disponible.`
+      )
+    ]
+  });
+
+  const answerDescription = answers.map(
+    item => `**${item.question}**\n${item.answer}`
+  ).join('\n\n');
+
+  await channel.send({
+    embeds: [
+      makeEmbed(
+        '📋・RESPUESTAS DE LA SOLICITUD',
+        answerDescription.slice(0, 4000)
+      )
+    ],
+    components: ticketActions()
+  });
+
+  await interaction.editReply({
+    content: `Tu ticket ha sido creado: ${channel}`
+  });
+
+  await logEvent(
+    guild,
+    '🎫・TICKET ABIERTO',
+    `Usuario: ${interaction.user.tag}\nCategoría: ${type.label}\nCanal: ${channel}`,
+    'ticketLogs'
+  );
+}
+
+async function createTranscript(channel) {
+  const messages = await channel.messages.fetch({ limit: 100 })
+    .catch(() => null);
+
+  if (!messages) return 'No se pudo recuperar el historial.';
+
+  return [...messages.values()]
+    .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+    .map(message =>
+      `[${new Date(message.createdTimestamp).toISOString()}] ` +
+      `${message.author.tag}: ${message.content || '[Embed o archivo]'}`
+    )
+    .join('\n')
+    .slice(0, 180000);
+}
+
+async function closeTicket(interaction, ticket) {
+  const transcript = await createTranscript(interaction.channel);
+
+  const logs = await interaction.guild.channels
+    .fetch(db.channels?.ticketLogs)
+    .catch(() => null);
+
+  if (logs?.isTextBased()) {
+    await logs.send({
+      embeds: [
+        makeEmbed(
+          '🔒・TICKET CERRADO',
+          `Canal: ${interaction.channel.name}\nUsuario: <@${ticket.userId}>\nCerrado por: ${interaction.user.tag}`
+        )
+      ],
+      files: [{
+        attachment: Buffer.from(transcript, 'utf8'),
+        name: `transcript-${interaction.channel.id}.txt`
+      }]
+    }).catch(() => {});
+  }
+
+  ticket.status = 'closed';
+  ticket.closedAt = Date.now();
+  saveData();
+
+  await interaction.channel.permissionOverwrites.edit(
+    ticket.userId,
+    {
+      SendMessages: false,
+      ViewChannel: true
+    }
+  ).catch(() => {});
+
+  await interaction.channel.send({
+    embeds: [
+      makeEmbed(
+        '🔒・TICKET CERRADO',
+        'La solicitud se ha cerrado. El canal no se eliminará automáticamente.'
+      )
+    ]
+  });
+
+  await interaction.reply({
+    content: 'Ticket cerrado y transcripción enviada a los registros.',
+    ephemeral: true
+  }).catch(() => {});
+
+  await logEvent(
+    interaction.guild,
+    '🔒・TICKET CERRADO',
+    `Canal: ${interaction.channel.name}\nCerrado por: ${interaction.user.tag}`,
+    'ticketLogs'
+  );
+}
+
+// ======================================================
+// 📋 POSTULACIONES
+// ======================================================
+
+const APPLICATIONS = {
+  staff: {
+    label: 'Staff',
+    emoji: '🛡️',
+    channel: 'staffApplications',
+    questions: [
+      '¿Cuál es tu edad?',
+      '¿Por qué quieres entrar al staff?',
+      '¿Qué experiencia tienes moderando?',
+      '¿Cuántas horas puedes dedicar?',
+      '¿Cómo resolverías un conflicto entre miembros?'
+    ]
+  },
+  dev: {
+    label: 'Dev',
+    emoji: '💻',
+    channel: 'devApplications',
+    questions: [
+      '¿Qué lenguajes de programación conoces?',
+      '¿Qué proyectos has desarrollado?',
+      '¿Qué experiencia tienes con Discord.js?',
+      '¿Qué te gustaría desarrollar para NOXVEN?'
+    ]
+  },
+  ally: {
+    label: 'Caza ALLYS',
+    emoji: '🤝',
+    channel: 'allyApplications',
+    questions: [
+      '¿Qué experiencia tienes buscando aliados?',
+      '¿Cómo comprobarías que un servidor es adecuado?',
+      '¿Cuánto tiempo puedes dedicar?',
+      '¿Cómo contactarías a otros servidores?'
+    ]
+  }
+};
+
+const activeApplications = new Map();
+
+async function sendApplicationQuestion(user, session) {
+  const application = APPLICATIONS[session.type];
+  const question = application.questions[session.index];
+
+  if (!question) {
+    await finishApplication(user, session);
+    return;
+  }
+
+  await user.send({
+    embeds: [
+      makeEmbed(
+        `${application.emoji}・POSTULACIÓN ${application.label.toUpperCase()}`,
+        `**Pregunta ${session.index + 1} de ${application.questions.length}**\n\n${question}\n\nResponde a este mensaje privado para continuar.`
+      )
+    ]
+  });
+}
+
+async function startApplication(interaction, type) {
+  const application = APPLICATIONS[type];
+
+  if (!application) return;
+
+  if (activeApplications.has(interaction.user.id)) {
+    return interaction.reply({
+      content: 'Ya tienes una postulación en curso.',
+      ephemeral: true
+    });
+  }
+
+  const session = {
+    type,
+    guildId: interaction.guild.id,
+    index: 0,
+    answers: [],
+    startedAt: Date.now()
+  };
+
+  try {
+    await interaction.user.send({
+      embeds: [
+        makeEmbed(
+          '♛・𝐍𝐎𝐗𝐕𝐄𝐍 | 𝐏𝐎𝐒𝐓𝐔𝐋𝐀𝐂𝐈𝐎́𝐍',
+          'Tu formulario se realizará por mensaje privado, pregunta por pregunta.'
+        )
+      ]
+    });
+  } catch {
+    return interaction.reply({
+      content: 'No puedo enviarte mensajes privados. Actívalos e inténtalo de nuevo.',
+      ephemeral: true
+    });
+  }
+
+  activeApplications.set(interaction.user.id, session);
+
+  await interaction.reply({
+    content: 'Te he enviado la primera pregunta por mensaje privado.',
+    ephemeral: true
+  });
+
+  await sendApplicationQuestion(interaction.user, session);
+}
+
+async function finishApplication(user, session) {
+  const application = APPLICATIONS[session.type];
+  const guild = client.guilds.cache.get(session.guildId);
+
+  if (!guild) {
+    activeApplications.delete(user.id);
+    return;
+  }
+
+  const channel = await guild.channels
+    .fetch(db.channels?.[application.channel])
+    .catch(() => null);
+
+  const description = session.answers.map(
+    (item, i) => `**${i + 1}. ${item.question}**\n${item.answer}`
+  ).join('\n\n');
+
+  if (channel?.isTextBased()) {
+    const embed = makeEmbed(
+      `${application.emoji}・POSTULACIÓN ${application.label.toUpperCase()}`,
+      `**Usuario:** <@${user.id}>\n**ID:** ${user.id}\n\n${description}`.slice(0, 4000)
+    );
+
+    await channel.send({
+      embeds: [embed],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`nox_app_accept_${session.type}_${user.id}`)
+            .setLabel('Aceptar')
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId(`nox_app_reject_${session.type}_${user.id}`)
+            .setLabel('Rechazar')
+            .setStyle(ButtonStyle.Danger)
+        )
+      ]
+    });
+  }
+
+  activeApplications.delete(user.id);
+
+  await user.send({
+    embeds: [
+      makeEmbed(
+        '📋・POSTULACIÓN ENVIADA',
+        'Tu postulación ha sido enviada al equipo de NOXVEN para su revisión.'
+      )
+    ]
+  }).catch(() => {});
+      }
