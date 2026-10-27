@@ -668,16 +668,10 @@ async function openTicket(interaction, typeIndex) {
     });
   }
 
-  const category = await guild.channels
-    .fetch(db.channels?.ticketCategory)
-    .catch(() => null);
-
-  if (!category) {
-    return interaction.reply({
-      content: 'No se encontró la categoría de tickets.',
-      ephemeral: true
-    });
-  }
+    const category = await findOrCreateCategory(
+    guild,
+    '♛・𝐓𝐈𝐂𝐊𝐄𝐓𝐒'
+  );
 
   const channel = await guild.channels.create({
     name: `ticket-${interaction.user.username}`
