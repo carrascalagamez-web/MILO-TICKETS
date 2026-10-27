@@ -756,13 +756,10 @@ async function createTicketFromModal(interaction, typeIndex) {
 
   await interaction.deferReply({ ephemeral: true });
 
-  const category = await guild.channels
-    .fetch(db.channels?.ticketCategory)
-    .catch(() => null);
-
-  if (!category) {
-    return interaction.editReply('No se encontró la categoría de tickets.');
-  }
+  const category = await findOrCreateCategory(
+  guild,
+  '♛・𝐓𝐈𝐂𝐊𝐄𝐓𝐒'
+);
 
   const channel = await guild.channels.create({
     name: `ticket-${interaction.user.username}`
